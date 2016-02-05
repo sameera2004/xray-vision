@@ -46,9 +46,12 @@ import logging
 from collections import deque
 import numpy as np
 from scipy import ndimage
-from matplotlib.widgets import Lasso
+from matplotlib.widgets import Lasso, RectangleSelector
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib import path
+from matplotlib.interactive_selectors import (LineTool, PaintTool,
+                                              EllipseTool, RectangleTool,
+                                              BaseTool)
 from ..utils.mpl_helpers import ensure_ax_meth
 
 logger = logging.getLogger(__name__)
@@ -98,7 +101,7 @@ class ManualMask(object):
         Attributes
         ----------
         mask : boolean array
-            all "postive" regions are True, negative False
+            all "positive" regions are True, negative False
 
         label_array : integer array
             each contiguous region is labeled with an integer
@@ -160,7 +163,7 @@ class ManualMask(object):
                                        norm=mask_norm,
                                        interpolation='nearest',
                                        origin=origin, extent=extent)
-        ax.set_title("'i': lasso, 't': pixel flip, alt inverts lasso, "
+        ax.set_title("'i': lasso, 'b' : box,'t': pixel flip, alt inverts lasso, "
                      "'r': reset mask, 'q': no tools")
 
         y, x = np.mgrid[:image.shape[0], :image.shape[1]]
@@ -168,6 +171,8 @@ class ManualMask(object):
         self.canvas.mpl_connect('key_press_event', self._key_press_callback)
         self._active = ''
         self._lasso = None
+        #self._line = None
+        self._box = None
         self._remove = False
         self._mask_stack = deque([], undo_history_depth)
 
@@ -205,6 +210,87 @@ class ManualMask(object):
             self.mask = self.mask | new_mask
 
         self._lasso = None
+
+    def _box_on_press(self, event):
+        if self.canvas.widgetlock.locked():
+            # clicking and releasing with out moving the mouse with the lasso
+            # tool does not fire our call back (which unlock the canvas) but
+            # does file the internal call backs which clean up the lasso
+            # leaving the canvas in a dead-locked state (due to our locking)
+
+            # if the canvas is locked by the last-used lasso tool and we are
+            # hitting the on-click logic again then we must be in the dead lock
+            # state so unlock the canvas.
+            if self.canvas.widgetlock.isowner(self._box):
+                self.canvas.widgetlock.release(self._box)
+            # or something else holds the lock, do nothing
+            else:
+                return
+        if event.inaxes is not self.ax:
+            return
+        self._remove = event.key == 'alt'
+        self._box = RectangleSelector(event.inaxes,
+                                      self._box_call_back,
+                                      drawtype='box', useblit=True,
+                                      button=[1, 3]) # don't use middle button
+                                      #minspanx=5, minspany=5)
+                                      #spancoords='pixels')
+        # acquire a lock on the widget drawing
+        self.canvas.widgetlock(self._box)
+
+    def _box_call_back(self, onselect):
+        eclick, erelease = onselect
+        self.canvas.widgetlock.release(self._box)
+        verts = [(eclick.xdata, eclick.ydata),      # left, bottom
+                 (erelease.xdata, eclick.ydata),    # left, top
+                 (eclick.xdata, erelease.ydata),    # right, top
+                 (erelease.xdata, erelease.ydata),  # right, bottom
+                 (eclick.xdata, eclick.ydata),      # ignored, close box
+                 ]
+        p = path.Path(verts)
+
+        new_mask = p.contains_points(self.points).reshape(*self.img_shape)
+        if self._remove:
+            self.mask = self.mask & ~new_mask
+        else:
+            self.mask = self.mask | new_mask
+
+        self._box = None
+
+    """def _line_on_press(self, event):
+        if self.canvas.widgetlock.locked():
+            # clicking and releasing with out moving the mouse with the line
+            # tool does not fire our call back (which unlock the canvas) but
+            # does file the internal call backs which clean up the line
+            # leaving the canvas in a dead-locked state (due to our locking)
+
+            # if the canvas is locked by the last-used line tool and we are
+            # hitting the on-click logic again then we must be in the dead lock
+            # state so unlock the canvas.
+            if self.canvas.widgetlock.isowner(self._line):
+                self.canvas.widgetlock.release(self._line)
+            # or something else holds the lock, do nothing
+            else:
+                return
+        if event.inaxes is not self.ax:
+            return
+        self._remove = event.key == 'alt'
+        self._line = LineTool(event.inaxes, end_points=(event.xdata, event.ydata),
+                              self._line_call_back)
+        # acquire a lock on the widget drawing
+        self.canvas.widgetlock(self._line)
+
+    def _line_call_back(self, verts):
+        self.canvas.widgetlock.release(self._line)
+        p = path.Path(verts)
+
+        new_mask = p.contains_points(self.points).reshape(*self.img_shape)
+        if self._remove:
+            self.mask = self.mask & ~new_mask
+        else:
+            self.mask = self.mask | new_mask
+
+        self._line = None"""
 
     def _pixel_flip_on_press(self, event):
         if event.inaxes is not self.ax:
@@ -246,6 +332,8 @@ class ManualMask(object):
             return
         if event.key == 'i':
             self.enable_lasso()
+        if event.key == 'b':
+            self.enable_box()
         elif event.key == 't':
             self.enable_pixel_flip()
         elif event.key == 'r':
@@ -263,6 +351,22 @@ class ManualMask(object):
                                             self._lasso_on_press)
         self._active = 'lasso'
 
+    def enable_box(self):
+        # turn off anything else
+        self.disable_tools()
+
+        self._cid = self.canvas.mpl_connect('button_press_event',
+                                            self._box_on_press)
+        self._active = 'box'
+
+    """def enable_line(self):
+        # turn off anything else
+        self.disable_tools()
+
+        self._cid = self.canvas.mpl_connect('button_press_event',
+                                            self._line_on_press)
+        self._active = 'line'"""
+
     def enable_pixel_flip(self):
         # turn off anything else
         self.disable_tools()
@@ -279,6 +383,12 @@ class ManualMask(object):
             if self._lasso and self.canvas.widgetlock.isowner(self._lasso):
                 self.canvas.widgetlock.release(self._lasso)
                 self._lasso = None
+            #if self._line and self.canvas.widgetlock.isowner(self._line):
+            #    self.canvas.widgetlock.release(self._line)
+            #    self._line = None
+            if self._box and self.canvas.widgetlock.isowner(self._box):
+                self.canvas.widgetlock.release(self._box)
+                self._box = None
 
         self._active = ''
         self.canvas.toolbar.set_message('')
