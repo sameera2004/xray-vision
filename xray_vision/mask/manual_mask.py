@@ -46,7 +46,10 @@ import logging
 from collections import deque
 import numpy as np
 from scipy import ndimage
+from skimage.draw import polygon
+
 from matplotlib.widgets import Lasso
+from matplotlib.patches import Circle, Wedge, Polygon
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib import path
 from ..utils.mpl_helpers import ensure_ax_meth
@@ -160,14 +163,15 @@ class ManualMask(object):
                                        norm=mask_norm,
                                        interpolation='nearest',
                                        origin=origin, extent=extent)
-        ax.set_title("'i': lasso, 't': pixel flip, alt inverts lasso, "
-                     "'r': reset mask, 'q': no tools")
+        ax.set_title("'i': lasso, 'p': polygon, 't': pixel flip, " 
+                     "alt inverts lasso, 'r': reset mask, 'q': no tools")
 
         y, x = np.mgrid[:image.shape[0], :image.shape[1]]
         self.points = np.transpose((x.ravel(), y.ravel()))
         self.canvas.mpl_connect('key_press_event', self._key_press_callback)
         self._active = ''
         self._lasso = None
+	self._polygon = None
         self._remove = False
         self._mask_stack = deque([], undo_history_depth)
 
@@ -194,6 +198,29 @@ class ManualMask(object):
         # acquire a lock on the widget drawing
         self.canvas.widgetlock(self._lasso)
 
+    def _polygon_on_press(self, event):
+        if self.canvas.widgetlock.locked():
+            # clicking and releasing with out moving the mouse with the polygon
+            # tool does not fire our call back (which unlock the canvas) but
+            # does file the internal call backs which clean up the polygon
+            # leaving the canvas in a dead-locked state (due to our locking)
+
+            # if the canvas is locked by the last-used polygon tool and we are
+            # hitting the on-click logic again then we must be in the dead lock
+            # state so unlock the canvas.
+            if self.canvas.widgetlock.isowner(self._polygon):
+                self.canvas.widgetlock.release(self._polygon)
+            # or something else holds the lock, do nothing
+            else:
+                return
+        if event.inaxes is not self.ax:
+            return
+        self._remove = event.key == 'alt'
+        self._polygon = Lasso(event.inaxes, (event.xdata, event.ydata),
+                            self._polygon_call_back)
+        # acquire a lock on the widget drawing
+        self.canvas.widgetlock(self._polygon)
+
     def _lasso_call_back(self, verts):
         self.canvas.widgetlock.release(self._lasso)
         p = path.Path(verts)
@@ -205,6 +232,18 @@ class ManualMask(object):
             self.mask = self.mask | new_mask
 
         self._lasso = None
+
+    def _polygon_call_back(self, verts):
+        self.canvas.widgetlock.release(self._polygon)
+        p = path.Path(verts)
+
+        new_mask = p.contains_points(self.points).reshape(*self.img_shape)
+        if self._remove:
+            self.mask = self.mask & ~new_mask
+        else:
+            self.mask = self.mask | new_mask
+
+        self._polygon = None
 
     def _pixel_flip_on_press(self, event):
         if event.inaxes is not self.ax:
@@ -246,6 +285,8 @@ class ManualMask(object):
             return
         if event.key == 'i':
             self.enable_lasso()
+	elif event.key == 'p':
+	    self.enable_polygon()
         elif event.key == 't':
             self.enable_pixel_flip()
         elif event.key == 'r':
@@ -262,6 +303,14 @@ class ManualMask(object):
         self._cid = self.canvas.mpl_connect('button_press_event',
                                             self._lasso_on_press)
         self._active = 'lasso'
+
+    def enable_polygon(self):
+        # turn off anything else
+        self.disable_tools()
+
+        self._cid = self.canvas.mpl_connect('button_press_event',
+                                            self._polygon_on_press)
+        self._active = 'polygon'
 
     def enable_pixel_flip(self):
         # turn off anything else
