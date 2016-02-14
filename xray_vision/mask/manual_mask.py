@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 class ManualMask(object):
     @ensure_ax_meth
-    def __init__(self, ax, image, cmap='gray',
+    def __init__(self, ax, image, cmap='gray', mask=None,
                  norm=None, aspect=None,
                  interpolation='nearest', alpha=None, vmin=None, vmax=None,
                  origin=None, extent=None, filternorm=1,
@@ -89,6 +89,8 @@ class ManualMask(object):
             drawing canvas. Its content does not affect the output.
         cmap : str, optional
             'gray' by default
+	mask : array, optional
+	     bool array, existing mask
         undo_history_depth : int, optional
             The maximum number of frames to keep in the undo history
             Defaults to 20.
@@ -145,7 +147,10 @@ class ManualMask(object):
         self.canvas = ax.figure.canvas
         self.img_shape = image.shape
         self.data = image
-        self._mask = np.zeros(self.img_shape, dtype=bool)
+	if mask is None:
+        	self._mask = np.zeros(self.img_shape, dtype=bool)
+	else:
+		self._mask = mask
 
         self.base_image = ax.imshow(self.data, zorder=1, cmap=cmap,
                                     norm=norm, aspect=aspect,
