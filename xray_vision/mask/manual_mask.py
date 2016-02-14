@@ -148,9 +148,9 @@ class ManualMask(object):
         self.img_shape = image.shape
         self.data = image
 	if mask is None:
-        	self._mask = np.zeros(self.img_shape, dtype=bool)
+            self._mask = np.zeros(self.img_shape, dtype=bool)
 	else:
-		self._mask = mask
+	    self._mask = mask
 
         self.base_image = ax.imshow(self.data, zorder=1, cmap=cmap,
                                     norm=norm, aspect=aspect,
@@ -221,7 +221,8 @@ class ManualMask(object):
         if event.inaxes is not self.ax:
             return
         self._remove = event.key == 'alt'
-        self._polygon = Lasso(event.inaxes, (event.xdata, event.ydata),
+        self._polygon =   zip(xdata[ind], ydata[ind])
+        Lasso(event.inaxes, (event.xdata, event.ydata),
                             self._polygon_call_back)
         # acquire a lock on the widget drawing
         self.canvas.widgetlock(self._polygon)
