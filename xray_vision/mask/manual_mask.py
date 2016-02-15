@@ -365,7 +365,8 @@ class ManualMask(object):
 
         self._cid = self.canvas.mpl_connect('button_press_event',
                                             self._line_on_press)
-        self._active = 'line'"""
+        self._active = 'line'
+        """
 
     def enable_pixel_flip(self):
         # turn off anything else
