@@ -48,7 +48,7 @@ import numpy as np
 from scipy import ndimage
 from skimage.draw import polygon
 
-from matplotlib.widgets import Lasso
+from matplotlib.widgets import Lasso, Rectangle
 from matplotlib.patches import Circle, Wedge, Polygon
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib import path
@@ -76,6 +76,8 @@ class ManualMask(object):
 
         i - enable lasso, free hand drawing to select points
           alt - while lasso in active, invert selection to remove points
+        p - draw a polygon picking virtices
+          alt - while polygon in active, invert selection to remove points
         t - pixel flipping, toggle individual pixels
         r - clear, remove all masks
         z - undo, undo the last edit up to `max_memory` steps back
@@ -147,9 +149,10 @@ class ManualMask(object):
         self.canvas = ax.figure.canvas
         self.img_shape = image.shape
         self.data = image
-	if mask is None:
+
+        if mask is None:
             self._mask = np.zeros(self.img_shape, dtype=bool)
-	else:
+        else:
 	    self._mask = mask
 
         self.base_image = ax.imshow(self.data, zorder=1, cmap=cmap,
@@ -168,15 +171,17 @@ class ManualMask(object):
                                        norm=mask_norm,
                                        interpolation='nearest',
                                        origin=origin, extent=extent)
-        ax.set_title("'i': lasso, 'p': polygon, 't': pixel flip, " 
-                     "alt inverts lasso, 'r': reset mask, 'q': no tools")
+        #ax.set_title("'i': lasso, 'j': rectangle, 't': pixel flip, " 
+        #             "alt inverts widegets, 'r': reset mask, 'q': no tools")
+        ax.set_title("'i': lasso, 'p': polygon,  't': pixel flip, alt inverts lasso, "
+                     "'r': reset mask, 'q': no tools")
 
         y, x = np.mgrid[:image.shape[0], :image.shape[1]]
         self.points = np.transpose((x.ravel(), y.ravel()))
         self.canvas.mpl_connect('key_press_event', self._key_press_callback)
         self._active = ''
         self._lasso = None
-	self._polygon = None
+        self._polygon = None
         self._remove = False
         self._mask_stack = deque([], undo_history_depth)
 
@@ -202,6 +207,29 @@ class ManualMask(object):
                             self._lasso_call_back)
         # acquire a lock on the widget drawing
         self.canvas.widgetlock(self._lasso)
+        
+    """def _rectangle_on_press(self, event):
+        if self.canvas.widgetlock.locked():
+            # clicking and releasing with out moving the mouse with the lasso
+            # tool does not fire our call back (which unlock the canvas) but
+            # does file the internal call backs which clean up the lasso
+            # leaving the canvas in a dead-locked state (due to our locking)
+
+            # if the canvas is locked by the last-used lasso tool and we are
+            # hitting the on-click logic again then we must be in the dead lock
+            # state so unlock the canvas.
+            if self.canvas.widgetlock.isowner(self._rectangle):
+                self.canvas.widgetlock.release(self._rectangle)
+            # or something else holds the lock, do nothing
+            else:
+                return
+        if event.inaxes is not self.ax:
+            return
+        self._remove = event.key == 'alt'
+        self._recatnagle = Rectangle(event.inaxes, (event.xdata, event.ydata),
+                            self._rectangle_call_back)
+        # acquire a lock on the widget drawing
+        self.canvas.widgetlock(self._rectangle)"""
 
     def _polygon_on_press(self, event):
         if self.canvas.widgetlock.locked():
@@ -221,11 +249,22 @@ class ManualMask(object):
         if event.inaxes is not self.ax:
             return
         self._remove = event.key == 'alt'
-        self._polygon =   zip(xdata[ind], ydata[ind])
-        Lasso(event.inaxes, (event.xdata, event.ydata),
-                            self._polygon_call_back)
+        # x.append(event.xdata)
+        # y.append(event.ydata)
+        # print (x, y)
+        # rr, cc = polygon(np.asarray(x), np.asarray(y))
+        # data = np.asarray([rr.tolist(), cc.tolist()])
+        #print ("**************")
+        self._polygon_call_back((event.xdata, event.ydata))
         # acquire a lock on the widget drawing
-        self.canvas.widgetlock(self._polygon)
+        self.canvas.widgetlock(self._lasso)
+        
+        ### Have add something to stop drwaing the polygon add chage the color????
+        # self._poygon_call_back(rr, cc)
+        # self._polygon =   zip(xdata[ind], ydata[ind])
+        # Lasso(event.inaxes, (event.xdata, event.ydata),
+        #                    self._polygon_call_back)
+        # 
 
     def _lasso_call_back(self, verts):
         self.canvas.widgetlock.release(self._lasso)
@@ -240,8 +279,17 @@ class ManualMask(object):
         self._lasso = None
 
     def _polygon_call_back(self, verts):
+        print (verts)
+    	self._x.append(verts[0])
+        self._y.append(verts[1])
         self.canvas.widgetlock.release(self._polygon)
-        p = path.Path(verts)
+             
+    def _draw_polygon(self):
+        print (self._x)
+    	rr, cc = polygon(np.asarray(self._x), np.asarray(self._y))
+        data = np.asarray([rr.tolist(), cc.tolist()])
+        
+        p = path.Path(data.T)
 
         new_mask = p.contains_points(self.points).reshape(*self.img_shape)
         if self._remove:
@@ -291,7 +339,7 @@ class ManualMask(object):
             return
         if event.key == 'i':
             self.enable_lasso()
-	elif event.key == 'p':
+        elif event.key == 'p':
 	    self.enable_polygon()
         elif event.key == 't':
             self.enable_pixel_flip()
@@ -301,7 +349,14 @@ class ManualMask(object):
             self.disable_tools()
         elif event.key == 'z':
             self.undo()
-
+            
+    def _button_press_callback(self, eclick):
+    	if eclick.button == 1:
+    	    self._cid = self.canvas.mpl_connect('button_press_event',
+                                            self._polygon_on_press)
+        else:
+            self._draw_polygon()
+        	
     def enable_lasso(self):
         # turn off anything else
         self.disable_tools()
@@ -313,11 +368,18 @@ class ManualMask(object):
     def enable_polygon(self):
         # turn off anything else
         self.disable_tools()
-
-        self._cid = self.canvas.mpl_connect('button_press_event',
-                                            self._polygon_on_press)
+        self._x = []
+        self._y = []
         self._active = 'polygon'
-
+        self.canvas.mpl_connect('button_press_event', self._button_press_callback)
+        
+        """def _polygon_select_callback(self, eclick):
+    	'eclick is the press events'
+    	if eclick.button == 1:
+    	   
+        else:
+            _draw_polygon(self)"""
+        	
     def enable_pixel_flip(self):
         # turn off anything else
         self.disable_tools()
