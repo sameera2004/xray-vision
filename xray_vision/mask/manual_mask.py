@@ -258,14 +258,7 @@ class ManualMask(object):
         self._polygon_call_back((event.xdata, event.ydata))
         # acquire a lock on the widget drawing
         self.canvas.widgetlock(self._lasso)
-        
-        ### Have add something to stop drwaing the polygon add chage the color????
-        # self._poygon_call_back(rr, cc)
-        # self._polygon =   zip(xdata[ind], ydata[ind])
-        # Lasso(event.inaxes, (event.xdata, event.ydata),
-        #                    self._polygon_call_back)
-        # 
-
+   
     def _lasso_call_back(self, verts):
         self.canvas.widgetlock.release(self._lasso)
         p = path.Path(verts)
@@ -351,6 +344,7 @@ class ManualMask(object):
             self.undo()
             
     def _button_press_callback(self, eclick):
+    	'eclick is the press events'
     	if eclick.button == 1:
     	    self._cid = self.canvas.mpl_connect('button_press_event',
                                             self._polygon_on_press)
