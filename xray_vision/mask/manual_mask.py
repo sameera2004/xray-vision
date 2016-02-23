@@ -49,10 +49,14 @@ from scipy import ndimage
 from skimage.draw import polygon
 
 from matplotlib.widgets import Lasso, Rectangle
-from matplotlib.patches import Circle, Wedge, Polygon
+#from matplotlib.interactive_selectors import RectangleTool
+import matplotlib.pyplot as plt
+
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib import path
+from matplotlib.patches import Circle
 from ..utils.mpl_helpers import ensure_ax_meth
+from matplotlib.colors import colorConverter
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +64,8 @@ logger = logging.getLogger(__name__)
 class ManualMask(object):
     @ensure_ax_meth
     def __init__(self, ax, image, cmap='gray', mask=None,
-                 norm=None, aspect=None,
-                 interpolation='nearest', alpha=None, vmin=None, vmax=None,
+                 norm=None, aspect=None,interpolation='nearest',
+                 alpha=None, vmin=None, vmax=None,
                  origin=None, extent=None, filternorm=1,
                  filterrad=4.0, resample=None, url=None,
                  undo_history_depth=20, **kwargs):
@@ -76,8 +80,10 @@ class ManualMask(object):
 
         i - enable lasso, free hand drawing to select points
           alt - while lasso in active, invert selection to remove points
-        p - draw a polygon picking virtices
+        j - draw a polygon by picking virtices
           alt - while polygon in active, invert selection to remove points
+        k - draw a rectangle
+          alt - while rectangle in active, invert selection to remove points
         t - pixel flipping, toggle individual pixels
         r - clear, remove all masks
         z - undo, undo the last edit up to `max_memory` steps back
@@ -91,8 +97,8 @@ class ManualMask(object):
             drawing canvas. Its content does not affect the output.
         cmap : str, optional
             'gray' by default
-	mask : array, optional
-	     bool array, existing mask
+	    mask : array, optional
+	        bool array, existing mask
         undo_history_depth : int, optional
             The maximum number of frames to keep in the undo history
             Defaults to 20.
@@ -153,7 +159,7 @@ class ManualMask(object):
         if mask is None:
             self._mask = np.zeros(self.img_shape, dtype=bool)
         else:
-	    self._mask = mask
+            self._mask = mask
 
         self.base_image = ax.imshow(self.data, zorder=1, cmap=cmap,
                                     norm=norm, aspect=aspect,
@@ -171,9 +177,9 @@ class ManualMask(object):
                                        norm=mask_norm,
                                        interpolation='nearest',
                                        origin=origin, extent=extent)
-        #ax.set_title("'i': lasso, 'j': rectangle, 't': pixel flip, " 
-        #             "alt inverts widegets, 'r': reset mask, 'q': no tools")
-        ax.set_title("'i': lasso, 'p': polygon,  't': pixel flip, alt inverts lasso, "
+   
+        ax.set_title("'i': lasso, 'j': polygon, 'k': rectangle, 't': pixel flip,"
+        	     " alt inverts lasso, \n 'z': undo mask,"
                      "'r': reset mask, 'q': no tools")
 
         y, x = np.mgrid[:image.shape[0], :image.shape[1]]
@@ -184,6 +190,7 @@ class ManualMask(object):
         self._polygon = None
         self._remove = False
         self._mask_stack = deque([], undo_history_depth)
+        self._colorin = colorConverter.to_rgba('red')
 
     def _lasso_on_press(self, event):
         if self.canvas.widgetlock.locked():
@@ -207,29 +214,6 @@ class ManualMask(object):
                             self._lasso_call_back)
         # acquire a lock on the widget drawing
         self.canvas.widgetlock(self._lasso)
-        
-    """def _rectangle_on_press(self, event):
-        if self.canvas.widgetlock.locked():
-            # clicking and releasing with out moving the mouse with the lasso
-            # tool does not fire our call back (which unlock the canvas) but
-            # does file the internal call backs which clean up the lasso
-            # leaving the canvas in a dead-locked state (due to our locking)
-
-            # if the canvas is locked by the last-used lasso tool and we are
-            # hitting the on-click logic again then we must be in the dead lock
-            # state so unlock the canvas.
-            if self.canvas.widgetlock.isowner(self._rectangle):
-                self.canvas.widgetlock.release(self._rectangle)
-            # or something else holds the lock, do nothing
-            else:
-                return
-        if event.inaxes is not self.ax:
-            return
-        self._remove = event.key == 'alt'
-        self._recatnagle = Rectangle(event.inaxes, (event.xdata, event.ydata),
-                            self._rectangle_call_back)
-        # acquire a lock on the widget drawing
-        self.canvas.widgetlock(self._rectangle)"""
 
     def _polygon_on_press(self, event):
         if self.canvas.widgetlock.locked():
@@ -247,18 +231,51 @@ class ManualMask(object):
             else:
                 return
         if event.inaxes is not self.ax:
-            return
+            return        
         self._remove = event.key == 'alt'
-        # x.append(event.xdata)
-        # y.append(event.ydata)
-        # print (x, y)
-        # rr, cc = polygon(np.asarray(x), np.asarray(y))
-        # data = np.asarray([rr.tolist(), cc.tolist()])
-        #print ("**************")
+        #self._on_pick(event)
+        #self._cid = self.canvas.mpl_connect('pick_event', self._on_pick)
         self._polygon_call_back((event.xdata, event.ydata))
         # acquire a lock on the widget drawing
-        self.canvas.widgetlock(self._lasso)
-   
+        self.canvas.widgetlock(self._polygon)
+        
+    def _rectangle_on_press(self, event):
+        if self.canvas.widgetlock.locked():
+            # clicking and releasing with out moving the mouse with the
+            # rectangle tool does not fire our call back (which unlock the
+            # canvas) but does file the internal call backs which clean up the
+            # retangle leaving the canvas in a dead-locked state (due to our
+            # locking)
+
+            # if the canvas is locked by the last-used rectangle tool and we are
+            # hitting the on-click logic again then we must be in the dead lock
+            # state so unlock the canvas.
+            if self.canvas.widgetlock.isowner(self._rectangle):
+                self.canvas.widgetlock.release(self._rectangle)
+            # or something else holds the lock, do nothing
+            else:
+                return
+        if event.inaxes is not self.ax:
+            return        
+        self._remove = event.key == 'alt'
+        self._on_pick(event)
+        #self._cid = self.canvas.mpl_connect('pick_event', self._on_pick)
+        self._rectangle_call_back((event.xdata, event.ydata))
+        # acquire a lock on the widget drawing
+        self.canvas.widgetlock(self._rectangle)
+              
+    def _on_pick(self, event):   ######################
+    	# print testData[event.ind], "clicked"
+        print ("came here")
+        print (event.xdata)
+        circ = Circle((event.xdata, event.ydata), radius=0.08, fc='r')
+        print (circ)
+        self.ax.add_patch(circ)
+        self.canvas.draw()
+    	# coll._facecolors[event.ind,:] = (1, 0, 0, 1)
+    	# coll._edgecolors[event.ind,:] = (1, 0, 0, 1)
+    	# fig.canvas.draw()
+  
     def _lasso_call_back(self, verts):
         self.canvas.widgetlock.release(self._lasso)
         p = path.Path(verts)
@@ -273,23 +290,20 @@ class ManualMask(object):
 
     def _polygon_call_back(self, verts):
         print (verts)
-    	self._x.append(verts[0])
+        self._x.append(verts[0])
         self._y.append(verts[1])
         self.canvas.widgetlock.release(self._polygon)
              
     def _draw_polygon(self):
-        print (self._x)
-    	rr, cc = polygon(np.asarray(self._x), np.asarray(self._y))
+        # draw a polygon 
+        rr, cc = polygon(np.asarray(self._x), np.asarray(self._y))
         data = np.asarray([rr.tolist(), cc.tolist()])
-        
         p = path.Path(data.T)
-
         new_mask = p.contains_points(self.points).reshape(*self.img_shape)
         if self._remove:
             self.mask = self.mask & ~new_mask
         else:
             self.mask = self.mask | new_mask
-
         self._polygon = None
 
     def _pixel_flip_on_press(self, event):
@@ -332,8 +346,10 @@ class ManualMask(object):
             return
         if event.key == 'i':
             self.enable_lasso()
-        elif event.key == 'p':
-	    self.enable_polygon()
+        elif event.key == 'j':
+            self.enable_polygon()
+        elif event.key == 'k':
+	        self.enable_rectangle()
         elif event.key == 't':
             self.enable_pixel_flip()
         elif event.key == 'r':
@@ -344,13 +360,13 @@ class ManualMask(object):
             self.undo()
             
     def _button_press_callback(self, eclick):
-    	'eclick is the press events'
-    	if eclick.button == 1:
-    	    self._cid = self.canvas.mpl_connect('button_press_event',
-                                            self._polygon_on_press)
+        'whenever a button is pressed after enabling lasso'
+        if eclick.button == 1:
+            self._cid = self.canvas.mpl_connect('button_press_event',
+                                                 self._polygon_on_press)
         else:
             self._draw_polygon()
-        	
+
     def enable_lasso(self):
         # turn off anything else
         self.disable_tools()
@@ -358,22 +374,25 @@ class ManualMask(object):
         self._cid = self.canvas.mpl_connect('button_press_event',
                                             self._lasso_on_press)
         self._active = 'lasso'
+        
+    def enable_rectangle(self):
+        # turn off anything else
+        self.disable_tools()
+
+        self._cid = self.canvas.mpl_connect('button_press_event',
+                                            self._rectangle_on_press)
+        self._active = 'rectangle'
 
     def enable_polygon(self):
         # turn off anything else
         self.disable_tools()
+        # Have to save eclick points to draw polygon
         self._x = []
         self._y = []
         self._active = 'polygon'
-        self.canvas.mpl_connect('button_press_event', self._button_press_callback)
-        
-        """def _polygon_select_callback(self, eclick):
-    	'eclick is the press events'
-    	if eclick.button == 1:
-    	   
-        else:
-            _draw_polygon(self)"""
-        	
+        self.canvas.mpl_connect('button_press_event',
+                                self._button_press_callback)
+
     def enable_pixel_flip(self):
         # turn off anything else
         self.disable_tools()
