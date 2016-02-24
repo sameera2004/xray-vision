@@ -56,12 +56,11 @@ logger = logging.getLogger(__name__)
 
 class ManualMask(object):
     @ensure_ax_meth
-    def __init__(self, ax, image, cmap='gray',
-                 norm=None, aspect=None,
+    def __init__(self, ax, image, cmap='gray', norm=None, aspect=None,
                  interpolation='nearest', alpha=None, vmin=None, vmax=None,
                  origin=None, extent=None, filternorm=1,
                  filterrad=4.0, resample=None, url=None,
-                 undo_history_depth=20, **kwargs):
+                 undo_history_depth=20, mask=None,  **kwargs):
         """
         Use a GUI to specify region(s) of interest.
 
